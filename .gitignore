@@ -1,0 +1,31 @@
+# Private data files
+gmail-mcp/email_review_openpyxl_smoke.xlsx
+gmail-mcp/email_review_output.xlsx
+gmail-mcp/gmail_review_db.json
+gmail-mcp/review_sessions/
+
+# Credentials and tokens
+gmail-mcp/credentials.json
+gmail-mcp/token.json
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
