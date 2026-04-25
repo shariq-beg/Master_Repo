@@ -1,0 +1,94 @@
+{
+  "session_id": "20260425_141107",
+  "created_at": "2026-04-25T14:11:07",
+  "instruction": "Review inbox emails from 2026/04/20 to 2026/04/25, max 5",
+  "parameters": {
+    "base_query": "in:inbox",
+    "after": "2026/04/20",
+    "before": "2026/04/25",
+    "max_results": 5
+  },
+  "summary": {
+    "total": 5,
+    "needs_further_review": 0,
+    "promotional_not_useful": 3,
+    "useful": 2
+  },
+  "items": [
+    {
+      "message_id": "19dc1e3a338880a4",
+      "thread_id": "19dc1e3a338880a4",
+      "date": "Fri, 24 Apr 2026 23:46:53 +0000 (UTC)",
+      "from": "LinkedIn Job Alerts <jobalerts-noreply@linkedin.com>",
+      "to": "Shariq Beg <shariq.beg@gmail.com>",
+      "subject": "Head of People and Culture, 12 month FTC, immediate start at Tandem Partners Pty Ltd.",
+      "classification": "useful",
+      "confidence": "high",
+      "reason": "Job alerts are relevant to this user's job search and career interests.",
+      "snippet": "Tandem Partners Pty Ltd. Head of People and Culture, 12 month FTC, immediate start: About the Organisation:Our client is a medium\u2026 \u034f \u034f \u034f \u034f \u034f \u034f \u034f \u034f \u034f \u034f \u034f \u034f \u034f \u034f \u034f \u034f \u034f \u034f \u034f \u034f \u034f \u034f \u034f \u034f \u034f \u034f \u034f \u034f \u034f \u034f \u034f \u034f \u034f \u034f \u034f",
+      "sender_domain": "linkedin.com",
+      "gmail_labels": "IMPORTANT, CATEGORY_UPDATES, INBOX",
+      "list_unsubscribe_present": "True"
+    },
+    {
+      "message_id": "19dc1d05c8e12969",
+      "thread_id": "19dc1d05c8e12969",
+      "date": "Sat, 25 Apr 2026 01:25:50 +0200",
+      "from": "SHEIN <shein@emailmarket.shein.com>",
+      "to": "shariq.beg@gmail.com",
+      "subject": "All under AU$9.99\ud83d\udc97Calling all fashionistas! ",
+      "classification": "promotional_not_useful",
+      "confidence": "high",
+      "reason": "The email contains a promotional offer for fashion items at a discounted price, targeting the recipient with a call to action to treat themselves. It is a generic marketing message with no personal action required beyond clicking or viewing the content.",
+      "snippet": "Treat yourself to a wardrobe refresh! \u200c \u200c \u200c \u200c \u200c \u200c \u200c \u200c \u200c \u200c \u200c \u200c \u200c \u200c \u200c \u200c \u200c \u200c \u200c \u200c \u200c \u200c \u200c \u200c \u200c \u200c \u200c \u200c \u200c \u200c \u200c \u200c \u200c \u200c \u200c \u200c \u200c \u200c \u200c \u200c \u200c \u200c \u200c \u200c \u200c \u200c \u200c \u200c \u200c \u200c \u200c \u200c \u200c \u200c \u200c \u200c \u200c \u200c \u200c \u200c \u200c \u200c \u200c \u200c \u200c \u200c \u200c \u200c \u200c \u200c \u200c \u200c \u200c \u200c \u200c \u200c \u200c \u200c \u200c \u200c \u200c \u200c",
+      "sender_domain": "emailmarket.shein.com",
+      "gmail_labels": "CATEGORY_PROMOTIONS, UNREAD, INBOX",
+      "list_unsubscribe_present": "True"
+    },
+    {
+      "message_id": "19dc1bca0ccbaad0",
+      "thread_id": "19dc1bca0ccbaad0",
+      "date": "Fri, 24 Apr 2026 16:04:17 -0700",
+      "from": "PayPal Communications <no_reply@communications.paypal.com>",
+      "to": "Shariq Beg <shariq.beg@gmail.com>",
+      "subject": "We're making some changes to our PayPal legal agreements",
+      "classification": "useful",
+      "confidence": "high",
+      "reason": "Account-specific legal agreement update from a service the user uses.",
+      "snippet": "Shariq Beg, you can view the changes on our website. Hello, Shariq Beg We&#39;re making some changes to our legal agreements that will apply to you. There is no action needed from you today, but if you",
+      "sender_domain": "communications.paypal.com",
+      "gmail_labels": "CATEGORY_PERSONAL, INBOX",
+      "list_unsubscribe_present": "False"
+    },
+    {
+      "message_id": "19dc1994d7563a07",
+      "thread_id": "19dc1994d7563a07",
+      "date": "Fri, 24 Apr 2026 16:12:20 -0600",
+      "from": "\"Kogan.com\" <store-news@e.kogan.com>",
+      "to": "<shariq.beg@gmail.com>",
+      "subject": "HURRY, ENDS TOMORROW! 3 Seater Sofa ONLY $689 + free shipping! (50% OFF standard retail price)",
+      "classification": "promotional_not_useful",
+      "confidence": "high",
+      "reason": "The email is a promotional message offering discounts and free shipping on home furniture, with a clear marketing intent. It includes limited personal relevance and no specific action required beyond clicking links, which are typical of generic sales promotions.",
+      "snippet": "Hurry, don&#39;t miss out on more home furniture deals in our Free Shipping Sale! Ends tomorrow! 25 Apr 2026 | Can&#39;t see images? View online \u2192 *Prices including a logo or a * symbol next to the",
+      "sender_domain": "e.kogan.com",
+      "gmail_labels": "CATEGORY_PROMOTIONS, UNREAD, INBOX",
+      "list_unsubscribe_present": "True"
+    },
+    {
+      "message_id": "19dc141b1b857c75",
+      "thread_id": "19dc141b1b857c75",
+      "date": "Fri, 24 Apr 2026 20:50:00 +0000 (UTC)",
+      "from": "Medium Daily Digest <noreply@medium.com>",
+      "to": "shariq.beg@gmail.com",
+      "subject": "I Applied to 20 Python Jobs in 2026\nHere\u2019s What They Actually Want | Faisal haque in Python in Plain English",
+      "classification": "promotional_not_useful",
+      "confidence": "high",
+      "reason": "Generic content digest with no personal action required. The email contains recommended articles and stories, which are part of a general newsletter without specific personal relevance or action required.",
+      "snippet": "Shariq Beg Stories for Shariq Beg @shariq.beg\u00b7Become a member Medium daily digest Today&#39;s highlights Faisal haque Faisal haqueinPython in Plain English I Applied to 20 Python Jobs in 2026",
+      "sender_domain": "medium.com",
+      "gmail_labels": "CATEGORY_UPDATES, INBOX",
+      "list_unsubscribe_present": "True"
+    }
+  ]
+}

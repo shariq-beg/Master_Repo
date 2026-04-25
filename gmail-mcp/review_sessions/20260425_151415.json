@@ -1,0 +1,39 @@
+{
+  "session_id": "20260425_151415",
+  "created_at": "2026-04-25T15:14:15",
+  "instruction": "Review emails from 2026/04/20 to 2026/04/25 max 1",
+  "parameters": {
+    "base_query": "in:inbox category:primary",
+    "after": "2026/04/20",
+    "before": "2026/04/25",
+    "max_results": 1
+  },
+  "summary": {
+    "total": 1,
+    "needs_further_review": 0,
+    "promotional_not_useful": 0,
+    "useful": 1
+  },
+  "items": [
+    {
+      "message_id": "19dc1e3a338880a4",
+      "thread_id": "19dc1e3a338880a4",
+      "date": "Fri, 24 Apr 2026 23:46:53 +0000 (UTC)",
+      "from": "LinkedIn Job Alerts <jobalerts-noreply@linkedin.com>",
+      "to": "Shariq Beg <shariq.beg@gmail.com>",
+      "subject": "Head of People and Culture, 12 month FTC, immediate start at Tandem Partners Pty Ltd.",
+      "classification": "useful",
+      "confidence": "high",
+      "reason": "Job alerts are relevant to this user's job search and career interests.",
+      "snippet": "Tandem Partners Pty Ltd. Head of People and Culture, 12 month FTC, immediate start: About the Organisation:Our client is a medium\u2026 \u034f \u034f \u034f \u034f \u034f \u034f \u034f \u034f \u034f \u034f \u034f \u034f \u034f \u034f \u034f \u034f \u034f \u034f \u034f \u034f \u034f \u034f \u034f \u034f \u034f \u034f \u034f \u034f \u034f \u034f \u034f \u034f \u034f \u034f \u034f",
+      "sender_domain": "linkedin.com",
+      "gmail_labels": "IMPORTANT, CATEGORY_UPDATES, INBOX",
+      "list_unsubscribe_present": "True",
+      "status": "reviewed",
+      "review_source": "cached",
+      "labels_applied": "",
+      "last_seen_at": "2026-04-25T15:13:50",
+      "reviewed_at": "2026-04-25T15:13:50"
+    }
+  ]
+}
