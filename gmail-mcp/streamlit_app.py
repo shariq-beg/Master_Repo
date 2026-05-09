@@ -1,39 +1,64 @@
+# -----------------------------------------------------------------------------
+# Imports
+# -----------------------------------------------------------------------------
+# This section imports Streamlit, data, path, async, and agent helpers used by the UI.
+
 from __future__ import annotations
 
 import asyncio
-import re
+import json
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 import streamlit as st
 
 from agent import (
-    DEFAULT_INSTRUCTION,
-    answer_session_question,
-    apply_label_with_mcp,
-    build_summary,
-    format_chat_summary,
-    load_review_db,
-    recategorize_session_item,
-    run_review,
-    save_review_db,
-    save_review_session_to_path,
-    update_message_status,
-    update_session_item_status,
-    write_excel,
-    trash_messages_by_label_with_mcp,
+    AgentState,
+    CONTEXT_WINDOW_TOKENS,
+    DEFAULT_MODEL,
+    MAX_CATEGORIZATION_BATCH,
+    PROGRESS_STAGE_LABELS,
+    REVIEW_CATEGORIES,
+    REVIEW_DB_FILE,
+    REVIEW_SESSIONS_DIR,
+    handle_user_message,
 )
 
 
-WELCOME_MESSAGE = "Tell me what Gmail window to review, for example: Review inbox emails from 2026/04/20 to 2026/04/25, max 5."
-PROGRESS_STEPS = [
-    ("parse_request", "Parse request"),
-    ("connect_mcp", "Connect Gmail MCP"),
-    ("search_gmail", "Search Gmail"),
-    ("classify_emails", "Read and classify emails"),
-    ("save_outputs", "Save session and Excel"),
-]
+# -----------------------------------------------------------------------------
+# UI Text And Progress Configuration
+# -----------------------------------------------------------------------------
+# This section defines user-facing progress messages and the initial assistant greeting.
 
+
+CHAT_PROGRESS_MESSAGES = {
+    "routing": "Okay, I am working out who should handle this.",
+    "loading_gmail_mcp_tools": "I am connecting to the Gmail tools.",
+    "gmail_read_agent_at_work": "I have activated the Gmail read agent.",
+    "gmail_mutation_agent_at_work": "I have activated the Gmail mutation agent.",
+    "searching_gmail": "I am searching Gmail.",
+    "reading_gmail": "I am reading the matching emails.",
+    "checking_review_cache": "I am checking what I have already reviewed.",
+    "classifying_emails": "I am classifying the emails.",
+    "saving_review_cache": "I am saving the review cache.",
+    "saving_review_session": "I am saving the review results.",
+    "executing_gmail_mutation": "I am applying the confirmed Gmail changes.",
+    "preparing_response": "I am preparing the answer for you.",
+    "done": "Done.",
+}
+
+WELCOME_MESSAGE = (
+    "Hi I am Qwen, your personal assistant. How can I help you today?\n\n"
+    "Here are my current capabilities:\n"
+    "1. I can read your Gmails and help you clean it up or summarise it."
+)
+
+
+# -----------------------------------------------------------------------------
+# Streamlit Page Setup
+# -----------------------------------------------------------------------------
+# This section configures the Streamlit page title, icon, and layout before rendering.
 
 st.set_page_config(
     page_title="Gmail Review Agent",
@@ -42,507 +67,466 @@ st.set_page_config(
 )
 
 
-def ensure_state() -> None:
-    if "messages" not in st.session_state:
-        reset_chat_state()
-    if "latest_session" not in st.session_state:
-        st.session_state.latest_session = None
-    if "latest_session_path" not in st.session_state:
-        st.session_state.latest_session_path = None
-    if "latest_excel_path" not in st.session_state:
-        st.session_state.latest_excel_path = None
-    if "pending_action" not in st.session_state:
-        st.session_state.pending_action = None
+# -----------------------------------------------------------------------------
+# Session State Helpers
+# -----------------------------------------------------------------------------
+# This section initializes and resets chat, model, review, and agent state for the UI.
+
+def run_async(value):
+    """Run an awaitable to completion from Streamlit's synchronous script flow.
+    Args:
+        value: Awaitable object to execute.
+    Returns:
+        The awaitable's resolved result.
+    Used by:
+        App Layout when calling handle_user_message.
+    """
+    return asyncio.run(value)
 
 
 def reset_chat_state() -> None:
-    st.session_state.messages = [
+    """Reset visible chat, agent state, latest review data, and notices.
+    Args:
+        None.
+    Returns:
+        None.
+    Side effects:
+        Mutates st.session_state values used by the chat and review UI.
+    Used by:
+        ensure_state during first load and the New Chat button.
+    """
+    st.session_state.ui_messages = [
         {
             "role": "assistant",
             "content": WELCOME_MESSAGE,
         }
     ]
+    st.session_state.agent_state = AgentState()
     st.session_state.latest_session = None
     st.session_state.latest_session_path = None
-    st.session_state.latest_excel_path = None
-    st.session_state.pending_action = None
+    st.session_state.review_notice = None
 
 
-def render_progress(progress_state: dict[str, str], container) -> None:
-    lines = []
-    for key, label in PROGRESS_STEPS:
-        state = progress_state.get(key, "pending")
-        if state == "done":
-            marker = "[x]"
-        elif state.startswith("running"):
-            marker = "[...]"
-        else:
-            marker = "[ ]"
-
-        detail = ""
-        if state.startswith("running:"):
-            detail = f" ({state.split(':', 1)[1]})"
-        lines.append(f"{marker} {label}{detail}")
-    container.markdown("```text\n" + "\n".join(lines) + "\n```")
-
-
-def run_review_sync(instruction: str, progress_container):
-    progress_state = {key: "pending" for key, _ in PROGRESS_STEPS}
-    render_progress(progress_state, progress_container)
-
-    def update_progress(step: str, state: str) -> None:
-        progress_state[step] = state
-        render_progress(progress_state, progress_container)
-
-    return asyncio.run(run_review(instruction, progress_callback=update_progress))
+def ensure_state() -> None:
+    """Ensure all required Streamlit session-state keys exist.
+    Args:
+        None.
+    Returns:
+        None.
+    Side effects:
+        Initializes missing st.session_state keys with default values.
+    Used by:
+        App Layout before rendering UI controls.
+    """
+    if "model" not in st.session_state:
+        st.session_state.model = DEFAULT_MODEL
+    if "temperature" not in st.session_state:
+        st.session_state.temperature = 0.1
+    if "ui_messages" not in st.session_state:
+        reset_chat_state()
+    if "agent_state" not in st.session_state:
+        st.session_state.agent_state = AgentState()
+    if "latest_session" not in st.session_state:
+        st.session_state.latest_session = None
+    if "latest_session_path" not in st.session_state:
+        st.session_state.latest_session_path = None
+    if "review_notice" not in st.session_state:
+        st.session_state.review_notice = None
 
 
-def is_review_request(prompt: str) -> bool:
-    lowered = prompt.lower()
-    return any(
-        phrase in lowered
-        for phrase in [
-            "review ",
-            "scan ",
-            "classify ",
-            "check inbox",
-            "check primary",
-            "check promotion",
-            "check promotions",
-        ]
-    )
-
-
-def rows_for_category(session: dict, category: str) -> list[dict]:
-    rows = session.get("items", [])
-    if category == "all":
-        return rows
-    return [row for row in rows if row.get("classification") == category]
-
-
-def normalize_category(value: str) -> str | None:
-    normalized = value.lower().strip().replace(" ", "_")
+def category_from_legacy(value: Any) -> str:
+    """Normalize older category names into the current category set.
+    Args:
+        value: Category or classification value to normalize.
+    Returns:
+        Normalized category string, or unknown for blank values.
+    Used by:
+        load_cache_stats and session_results when reading persisted data.
+    """
+    normalized = str(value or "").strip().lower()
     aliases = {
-        "promotional": "promotional_not_useful",
-        "promotions": "promotional_not_useful",
-        "promo": "promotional_not_useful",
-        "not_useful": "promotional_not_useful",
-        "needs_review": "needs_further_review",
-        "further_review": "needs_further_review",
-        "review": "needs_further_review",
+        "job_alert": "job_notifications",
+        "job_alerts": "job_notifications",
+        "job_notification": "job_notifications",
+        "jobs": "job_notifications",
+        "promotional_not_useful": "promotional",
+        "needs_further_review": "need_further_review",
+        "needs_review": "need_further_review",
     }
-    normalized = aliases.get(normalized, normalized)
-    if normalized in {
-        "promotional_not_useful",
-        "useful",
-        "needs_further_review",
-    }:
-        return normalized
-    return None
+    return aliases.get(normalized, normalized or "unknown")
 
 
-def parse_recategorize_request(prompt: str, session: dict) -> dict | None:
-    lowered = prompt.lower()
-    if not any(word in lowered for word in ["recategorise", "recategorize", "mark", "change"]):
-        return None
+# -----------------------------------------------------------------------------
+# Cache And Review Session Helpers
+# -----------------------------------------------------------------------------
+# This section reads local cache and review-session files for sidebar and table display.
 
-    category_match = re.search(
-        r"\b(?:as|to)\s+(promotional_not_useful|promotional|promotions|promo|not useful|useful|needs_further_review|needs review|review)\b",
-        lowered,
-    )
-    if not category_match:
-        return None
-
-    category = normalize_category(category_match.group(1))
-    if not category:
-        return None
-
-    index_match = re.search(r"\b(?:email|row|item)\s+(\d+)\b", lowered)
-    if index_match:
+def load_cache_stats() -> dict[str, Any]:
+    """Load summary counts from the local Gmail review cache file.
+    Args:
+        None.
+    Returns:
+        A dictionary with total cached messages, category counts, and update time.
+    Used by:
+        App Layout when rendering the Persistent Cache sidebar panel.
+    """
+    if not REVIEW_DB_FILE.exists():
         return {
-            "type": "recategorize",
-            "item_index": int(index_match.group(1)),
-            "classification": category,
+            "total_cached": 0,
+            "category_counts": {},
+            "updated_at": None,
+        }
+    try:
+        payload = json.loads(REVIEW_DB_FILE.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return {
+            "total_cached": 0,
+            "category_counts": {},
+            "updated_at": "Unreadable cache file",
         }
 
-    target_text = prompt[: category_match.start()].strip()
-    target_text = re.sub(
-        r"(?i)\b(recategorise|recategorize|mark|change|the|email|message)\b",
-        "",
-        target_text,
-    ).strip()
-    if not target_text:
-        return None
+    messages = payload.get("messages", {})
+    counts = {
+        **{category: 0 for category in REVIEW_CATEGORIES},
+        "unknown": 0,
+    }
+    for row in messages.values():
+        category = category_from_legacy(row.get("category") or row.get("classification"))
+        if category not in counts:
+            category = "unknown"
+        counts[category] += 1
 
-    matches = []
-    for index, row in enumerate(session.get("items", []), 1):
-        haystack = f"{row.get('subject', '')} {row.get('from', '')}".lower()
-        if target_text.lower() in haystack:
-            matches.append((index, row))
-
-    if len(matches) == 1:
-        return {
-            "type": "recategorize",
-            "item_index": matches[0][0],
-            "classification": category,
-        }
-    if len(matches) > 1:
-        candidates = "\n".join(
-            f"{index}. {row.get('subject', '(no subject)')} - {row.get('from', '')}"
-            for index, row in matches[:10]
-        )
-        return {
-            "type": "ambiguous_recategorize",
-            "message": f"I found multiple matches. Please recategorise by row number:\n{candidates}",
-        }
-    return None
-
-
-def execute_recategorize_action(action: dict) -> str:
-    session = st.session_state.latest_session
-    session_path = st.session_state.latest_session_path
-    excel_path = st.session_state.latest_excel_path
-
-    item = recategorize_session_item(
-        session=session,
-        item_index=action["item_index"],
-        new_classification=action["classification"],
-    )
-    review_db = load_review_db()
-    message_id = item.get("message_id")
-    if message_id:
-        review_db.setdefault("messages", {}).setdefault(message_id, {}).update(item)
-        update_message_status(review_db, message_id, status="manually_recategorised")
-        save_review_db(review_db)
-    save_review_session_to_path(session, session_path)
-    write_excel(session.get("items", []), excel_path)
-
-    subject = item.get("subject") or "(no subject)"
-    return (
-        f"Updated email {action['item_index']} to `{action['classification']}`.\n\n"
-        f"Subject: {subject}"
-    )
-
-
-def parse_label_request(prompt: str, session: dict) -> dict | None:
-    lowered = prompt.lower()
-    if not any(word in lowered for word in ["label", "labelled", "labeled"]):
-        return None
-
-    category_match = re.search(
-        r"\b(promotional_not_useful|promotional|promotions|useful|needs_further_review|needs review|all)\b",
-        lowered,
-    )
-    if not category_match:
-        return None
-
-    explicit_label_match = re.search(
-        r"(?:as|with label|label name)\s+['\"]?([^'\"]+?)['\"]?$",
-        prompt,
-        re.IGNORECASE,
-    )
-
-    category = category_match.group(1).replace(" ", "_")
-    if category in {"promotional", "promotions"}:
-        category = "promotional_not_useful"
-
-    label_name = explicit_label_match.group(1).strip() if explicit_label_match else category
-    rows = rows_for_category(session, category)
     return {
-        "type": "label",
-        "category": category,
-        "label_name": label_name,
-        "items": rows,
-        "message_ids": [row["message_id"] for row in rows if row.get("message_id")],
-        "count": len(rows),
+        "total_cached": len(messages),
+        "category_counts": counts,
+        "updated_at": payload.get("updated_at"),
     }
 
 
-def parse_trash_request(prompt: str) -> dict | None:
-    lowered = prompt.lower()
-    if "trash" not in lowered:
-        return None
-
-    label_match = re.search(
-        r"(?:label(?:ed)?|with label)\s+['\"]?([^'\"]+?)['\"]?(?:\s|$)",
-        prompt,
-        re.IGNORECASE,
+def latest_review_session() -> tuple[dict[str, Any] | None, Path | None]:
+    """Load the most recently modified review-session JSON file.
+    Args:
+        None.
+    Returns:
+        A tuple of session payload and path, or None values when unavailable.
+    Side effects:
+        Ensures the review sessions directory exists.
+    Used by:
+        latest_review_session_if_newer after Gmail read-agent turns.
+    """
+    REVIEW_SESSIONS_DIR.mkdir(exist_ok=True)
+    files = sorted(
+        REVIEW_SESSIONS_DIR.glob("*.json"),
+        key=lambda item: item.stat().st_mtime,
+        reverse=True,
     )
-    if not label_match:
-        return None
+    if not files:
+        return None, None
 
-    count_match = re.search(r"\b(?:first|max|limit)?\s*(\d+)\b", prompt)
-    max_results = int(count_match.group(1)) if count_match else 10
-    return {
-        "type": "trash_by_label",
-        "label_name": label_match.group(1).strip(),
-        "max_results": max(1, min(max_results, 300)),
-    }
+    path = files[0]
+    try:
+        return json.loads(path.read_text(encoding="utf-8")), path
+    except json.JSONDecodeError:
+        return None, path
 
 
-def describe_pending_action(action: dict) -> str:
-    if action["type"] == "label":
-        email_lines = "\n".join(
-            f"{index}. {row.get('subject', '(no subject)')} - {row.get('from', '')}"
-            for index, row in enumerate(action.get("items", [])[:20], 1)
-        )
-        if action.get("count", 0) > 20:
-            email_lines += f"\n...and {action['count'] - 20} more."
-
-        return (
-            f"Preview: apply Gmail label `{action['label_name']}` to "
-            f"{action['count']} `{action['category']}` emails from the latest session.\n\n"
-            f"Emails to label:\n{email_lines or '(none)'}\n\n"
-            "Reply `confirm` to apply the label, or `cancel` to stop."
-        )
-    if action["type"] == "trash_by_label":
-        return (
-            f"Preview: move up to {action['max_results']} Gmail messages with label "
-            f"`{action['label_name']}` to Trash.\n\n"
-            "Reply `confirm` to move them to Trash, or `cancel` to stop."
-        )
-    return "Unknown pending action."
+def latest_review_session_if_newer(
+    previous_path: Path | None,
+) -> tuple[dict[str, Any] | None, Path | None]:
+    """Return the latest review session only when it differs from a prior path.
+    Args:
+        previous_path: Previously displayed review-session path, if any.
+    Returns:
+        A tuple of session payload and path when newer, otherwise None values.
+    Used by:
+        App Layout after handle_user_message completes a Gmail read-agent turn.
+    """
+    session, path = latest_review_session()
+    if path is None:
+        return None, None
+    if previous_path and path.resolve() == previous_path.resolve():
+        return None, None
+    return session, path
 
 
-def execute_pending_action_sync(action: dict) -> str:
-    if action["type"] == "label":
-        results = []
-        review_db = load_review_db()
-        for message_id in action["message_ids"]:
-            results.append(
-                asyncio.run(
-                    apply_label_with_mcp(
-                        message_id=message_id,
-                        label_name=action["label_name"],
-                    )
-                )
-            )
-            update_message_status(
-                review_db,
-                message_id=message_id,
-                status="labelled_to_be_deleted"
-                if action["label_name"].lower() == "to be deleted"
-                else "labelled",
-                label_name=action["label_name"],
-            )
-            update_session_item_status(
-                st.session_state.latest_session,
-                message_id=message_id,
-                status="labelled_to_be_deleted"
-                if action["label_name"].lower() == "to be deleted"
-                else "labelled",
-                label_name=action["label_name"],
-            )
-        save_review_db(review_db)
-        save_review_session_to_path(
-            st.session_state.latest_session,
-            st.session_state.latest_session_path,
-        )
-        write_excel(
-            st.session_state.latest_session.get("items", []),
-            st.session_state.latest_excel_path,
-        )
-        return f"Applied label `{action['label_name']}` to {len(results)} emails."
+def session_results(session: dict[str, Any]) -> list[dict[str, Any]]:
+    """Normalize review-session rows for table rendering.
+    Args:
+        session: Review-session payload loaded from JSON.
+    Returns:
+        A list of normalized result dictionaries.
+    Used by:
+        session_counts and render_latest_session.
+    """
+    rows = session.get("results")
+    if rows is None:
+        rows = session.get("items", [])
 
-    if action["type"] == "trash_by_label":
-        result = asyncio.run(
-            trash_messages_by_label_with_mcp(
-                label_name=action["label_name"],
-                max_results=action["max_results"],
-            )
-        )
-        review_db = load_review_db()
-        trashed_ids = [row.get("id") for row in result.get("trashed", []) if row.get("id")]
-        for message_id in trashed_ids:
-            update_message_status(review_db, message_id=message_id, status="deleted")
-
-        if st.session_state.latest_session:
-            st.session_state.latest_session["items"] = [
-                row
-                for row in st.session_state.latest_session.get("items", [])
-                if row.get("message_id") not in set(trashed_ids)
-            ]
-            st.session_state.latest_session["summary"] = build_summary(
-                st.session_state.latest_session["items"]
-            )
-            save_review_session_to_path(
-                st.session_state.latest_session,
-                st.session_state.latest_session_path,
-            )
-            write_excel(
-                st.session_state.latest_session.get("items", []),
-                st.session_state.latest_excel_path,
-            )
-        save_review_db(review_db)
-        return (
-            f"Moved {result.get('trashed_count', 0)} emails with label "
-            f"`{result.get('label_name', action['label_name'])}` to Trash."
-        )
-
-    return "I could not execute that action."
+    normalized = []
+    for row in rows:
+        item = dict(row)
+        item["category"] = category_from_legacy(item.get("category") or item.get("classification"))
+        item.setdefault("message_id", item.get("id", ""))
+        normalized.append(item)
+    return normalized
 
 
-def handle_followup(prompt: str) -> str:
-    lowered = prompt.lower().strip()
-    pending_action = st.session_state.pending_action
-    if pending_action:
-        if lowered in {"confirm", "yes", "proceed", "do it"}:
-            result = execute_pending_action_sync(pending_action)
-            st.session_state.pending_action = None
-            return result
-        if lowered in {"cancel", "stop", "no"}:
-            st.session_state.pending_action = None
-            return "Cancelled the pending action."
-        return "There is a pending action. Reply `confirm` to proceed or `cancel` to stop."
+def session_counts(session: dict[str, Any]) -> dict[str, int]:
+    """Count review-session rows by current review category.
+    Args:
+        session: Review-session payload loaded from JSON.
+    Returns:
+        A dictionary mapping category names to counts.
+    Used by:
+        render_latest_session when displaying metric cards.
+    """
+    counts = {category: 0 for category in REVIEW_CATEGORIES}
+    for row in session_results(session):
+        category = row.get("category")
+        if category in counts:
+            counts[category] += 1
+    return counts
 
-    if lowered in {"confirm", "yes", "proceed", "do it"}:
-        return "There is no pending action to confirm. Ask me to label or trash something first, and I will show a preview."
 
+# -----------------------------------------------------------------------------
+# Review Session Rendering
+# -----------------------------------------------------------------------------
+# This section renders the latest review metrics, filter controls, table, and download button.
+
+def render_latest_session() -> None:
+    """Render the latest review notice, metrics, table, and JSON download.
+    Args:
+        None.
+    Returns:
+        None.
+    Side effects:
+        Writes Streamlit UI elements to the page.
+    Used by:
+        App Layout after the chat interface.
+    """
     session = st.session_state.latest_session
-    recategorize_action = parse_recategorize_request(prompt, session)
-    if recategorize_action:
-        if recategorize_action["type"] == "ambiguous_recategorize":
-            return recategorize_action["message"]
-        return execute_recategorize_action(recategorize_action)
-
-    label_action = parse_label_request(prompt, session)
-    if label_action:
-        st.session_state.pending_action = label_action
-        return describe_pending_action(label_action)
-
-    trash_action = parse_trash_request(prompt)
-    if trash_action:
-        st.session_state.pending_action = trash_action
-        return describe_pending_action(trash_action)
-
-    return answer_session_question(session, prompt)
-
-
-def render_metrics(session: dict) -> None:
-    summary = session["summary"]
-    cols = st.columns(4)
-    cols[0].metric("Reviewed", summary.get("total", 0))
-    cols[1].metric("Promotional", summary.get("promotional_not_useful", 0))
-    cols[2].metric("Useful", summary.get("useful", 0))
-    cols[3].metric("Needs Review", summary.get("needs_further_review", 0))
-
-
-def render_review_table(session: dict) -> None:
-    rows = session.get("items", [])
-    if not rows:
-        st.info("No reviewed emails in this session.")
+    path = st.session_state.latest_session_path
+    notice = st.session_state.review_notice
+    if notice:
+        st.divider()
+        st.info(notice)
+    if not session:
         return
 
-    df = pd.DataFrame(rows)
-    category = st.selectbox(
-        "Filter",
-        ["all", "promotional_not_useful", "useful", "needs_further_review"],
-        index=0,
-    )
-    if category != "all":
-        df = df[df["classification"] == category]
+    rows = session_results(session)
+    counts = session_counts(session)
 
-    visible_columns = [
-        "classification",
-        "confidence",
-        "status",
-        "review_source",
-        "labels_applied",
-        "subject",
-        "from",
-        "sender_domain",
-        "reason",
-        "date",
-        "gmail_labels",
-        "list_unsubscribe_present",
-        "snippet",
-        "message_id",
-    ]
-    st.dataframe(
-        df[[column for column in visible_columns if column in df.columns]],
-        use_container_width=True,
-        hide_index=True,
-    )
+    st.divider()
+    st.subheader("Latest Review")
+    cols = st.columns(5)
+    cols[0].metric("Reviewed", len(rows))
+    cols[1].metric("Useful", counts["useful"])
+    cols[2].metric("Promotional", counts["promotional"])
+    cols[3].metric("Jobs", counts["job_notifications"])
+    cols[4].metric("Needs Review", counts["need_further_review"])
 
+    if rows:
+        df = pd.DataFrame(rows)
+        category = st.selectbox(
+            "Filter",
+            ["all", *REVIEW_CATEGORIES],
+            index=0,
+        )
+        if category != "all":
+            df = df[df["category"] == category]
 
-def render_downloads(session_path: Path | None, excel_path: Path | None) -> None:
-    cols = st.columns(2)
-    if session_path and session_path.exists():
-        cols[0].download_button(
+        visible_columns = [
+            "category",
+            "confidence",
+            "review_source",
+            "subject",
+            "from",
+            "reason",
+            "date",
+            "snippet",
+            "message_id",
+            "thread_id",
+        ]
+        st.dataframe(
+            df[[column for column in visible_columns if column in df.columns]],
+            use_container_width=True,
+            hide_index=True,
+        )
+
+    if path and path.exists():
+        st.download_button(
             "Download Session JSON",
-            data=session_path.read_bytes(),
-            file_name=session_path.name,
+            data=path.read_bytes(),
+            file_name=path.name,
             mime="application/json",
         )
-    if excel_path and excel_path.exists():
-        cols[1].download_button(
-            "Download Excel",
-            data=excel_path.read_bytes(),
-            file_name=excel_path.name,
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        )
 
+
+# -----------------------------------------------------------------------------
+# App Layout
+# -----------------------------------------------------------------------------
+# This section builds the Streamlit sidebar, chat interface, progress status, and review table.
 
 ensure_state()
 
 st.title("Gmail Review Agent")
 
 with st.sidebar:
-    st.subheader("Current Run")
-    st.caption("Gmail is read through the MCP server. This app does not label, archive, delete, or move emails.")
-    if st.button("Use Example Prompt"):
-        st.session_state.example_prompt = DEFAULT_INSTRUCTION
-    if st.button("Clear Chat"):
+    st.subheader("Chat")
+    st.caption("New Chat clears the visible conversation plus chat and Gmail agent context.")
+    if st.button("New Chat", use_container_width=True):
         reset_chat_state()
         st.rerun()
 
-for message in st.session_state.messages:
+    st.divider()
+    st.subheader("Model")
+    st.session_state.model = st.text_input("Model", value=st.session_state.model)
+    st.session_state.temperature = st.slider(
+        "Temperature",
+        min_value=0.0,
+        max_value=1.0,
+        value=float(st.session_state.temperature),
+        step=0.05,
+    )
+    st.caption(
+        f"Context target: {CONTEXT_WINDOW_TOKENS} tokens. "
+        f"Batch target: {MAX_CATEGORIZATION_BATCH} emails."
+    )
+
+    st.divider()
+    st.subheader("Persistent Cache")
+    cache_stats = load_cache_stats()
+    st.metric("Cached emails", cache_stats["total_cached"])
+    counts = cache_stats.get("category_counts", {})
+    st.caption(
+        "Useful: {useful} | Promotional: {promotional} | Jobs: {jobs} | Needs review: {review}".format(
+            useful=counts.get("useful", 0),
+            promotional=counts.get("promotional", 0),
+            jobs=counts.get("job_notifications", 0),
+            review=counts.get("need_further_review", 0),
+        )
+    )
+    if cache_stats.get("updated_at"):
+        st.caption(f"Updated: {cache_stats['updated_at']}")
+    st.caption(f"Cache file: {REVIEW_DB_FILE.name}")
+
+for message in st.session_state.ui_messages:
     with st.chat_message(message["role"]):
         st.write(message["content"])
 
-prompt = st.chat_input(
-    "Review inbox emails from 2026/04/20 to 2026/04/25, max 5"
-)
-if "example_prompt" in st.session_state:
-    prompt = st.session_state.pop("example_prompt")
+prompt = st.chat_input("Ask the agent to scan Gmail or review prior results")
 
 if prompt:
-    st.session_state.messages.append({"role": "user", "content": prompt})
+    st.session_state.ui_messages.append({"role": "user", "content": prompt})
+
     with st.chat_message("user"):
         st.write(prompt)
 
-    should_run_review = st.session_state.latest_session is None or is_review_request(prompt)
-
     with st.chat_message("assistant"):
-        if should_run_review:
-            with st.status("Running Gmail review...", expanded=True) as status:
-                progress_container = st.empty()
-                session, session_path, excel_path = run_review_sync(
-                    prompt,
-                    progress_container,
+        response_placeholder = st.empty()
+        progress_placeholder = st.empty()
+        progress_lines: list[str] = []
+        seen_progress_stages: set[str] = set()
+        specialist_progress_started = {"value": False}
+
+        def render_progress_line(stage: str) -> None:
+            """Render one visible progress line after a specialist starts.
+
+            Args:
+                stage: Progress stage key emitted by the agent workflow.
+
+            Returns:
+                None.
+
+            Side effects:
+                Updates the assistant progress placeholder in the Streamlit chat.
+
+            Used by:
+                update_progress inside the prompt-handling UI block.
+            """
+            if stage in {"gmail_read_agent_at_work", "gmail_mutation_agent_at_work"}:
+                specialist_progress_started["value"] = True
+            if not specialist_progress_started["value"]:
+                return
+            message = CHAT_PROGRESS_MESSAGES.get(stage)
+            if not message or stage in seen_progress_stages:
+                return
+            seen_progress_stages.add(stage)
+            progress_lines.append(f"- {message}")
+            progress_placeholder.markdown("\n".join(progress_lines))
+
+        with st.status(PROGRESS_STAGE_LABELS["routing"], expanded=False) as status:
+            try:
+                def update_progress(stage: str, label: str) -> None:
+                    """Update Streamlit status and append readable progress lines.
+
+                    Args:
+                        stage: Progress stage key emitted by the agent workflow.
+                        label: User-facing progress label for the status widget.
+
+                    Returns:
+                        None.
+
+                    Side effects:
+                        Updates Streamlit status and progress placeholders.
+
+                    Used by:
+                        handle_user_message as its progress_callback.
+                    """
+                    status.update(
+                        label=label or PROGRESS_STAGE_LABELS.get(stage, stage),
+                        state="running",
+                    )
+                    render_progress_line(stage)
+
+                previous_session_path = st.session_state.latest_session_path
+                result = run_async(
+                    handle_user_message(
+                        prompt=prompt,
+                        state=st.session_state.agent_state,
+                        model=st.session_state.model,
+                        temperature=st.session_state.temperature,
+                        ui_messages=st.session_state.ui_messages,
+                        progress_callback=update_progress,
+                    )
                 )
-                status.update(label="Review complete", state="complete")
+                st.session_state.agent_state = result.state
+                response_text = (result.response or "").strip()
+                if not response_text:
+                    response_text = "I finished the run, but did not receive a text response."
 
-            summary_text = format_chat_summary(session, session_path, excel_path)
-            st.session_state.latest_session = session
-            st.session_state.latest_session_path = session_path
-            st.session_state.latest_excel_path = excel_path
-        else:
-            with st.status("Thinking...", expanded=False) as status:
-                summary_text = handle_followup(prompt)
+                if result.route == "gmail_read_agent":
+                    st.session_state.latest_session = None
+                    st.session_state.latest_session_path = None
+                    st.session_state.review_notice = "Gmail review is running. Waiting for a new review session..."
+                    latest_session, latest_path = latest_review_session_if_newer(
+                        previous_session_path
+                    )
+                    if latest_session is not None:
+                        st.session_state.latest_session = latest_session
+                        st.session_state.latest_session_path = latest_path
+                        st.session_state.review_notice = None
+                    else:
+                        st.session_state.review_notice = (
+                            "No new review table was produced for the latest Gmail turn. "
+                            "The previous review table was cleared to avoid showing stale cached results."
+                        )
+                else:
+                    st.session_state.review_notice = None
+
                 status.update(label="Done", state="complete")
+            except Exception as exc:
+                response_text = f"Agent run failed: {exc}"
+                status.update(label="Failed", state="error")
 
-        st.write(summary_text)
+        response_placeholder.write(response_text)
+        progress_placeholder.empty()
 
-    st.session_state.messages.append({"role": "assistant", "content": summary_text})
-    st.rerun()
-
-if st.session_state.latest_session:
-    st.divider()
-    st.subheader("Latest Review")
-    render_metrics(st.session_state.latest_session)
-    render_review_table(st.session_state.latest_session)
-    render_downloads(
-        st.session_state.latest_session_path,
-        st.session_state.latest_excel_path,
+    st.session_state.ui_messages.append(
+        {
+            "role": "assistant",
+            "content": response_text,
+        }
     )
+
+render_latest_session()
